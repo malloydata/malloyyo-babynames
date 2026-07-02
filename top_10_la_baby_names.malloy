@@ -1,0 +1,10 @@
+import "baby_names.malloy"
+
+run: baby_names -> {
+  where: state = 'LA'
+  group_by: name
+  aggregate: total_babies
+  having: total_babies > 500
+  order_by: total_babies desc
+  limit: 10
+}

@@ -1,0 +1,3 @@
+import { baby_names } from 'baby_names.malloy'
+
+export { baby_names }
