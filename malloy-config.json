@@ -3,10 +3,5 @@
     "duckdb": {
       "is": "duckdb"
     }
-  },
-  "virtualMap": {
-    "duckdb": {
-      "baby_names": "'https://storage.googleapis.com/malloyyo/baby_names/baby_names.parquet'"
-    }
   }
 }
