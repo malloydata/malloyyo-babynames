@@ -1,6 +1,18 @@
-##! experimental
+##! experimental.virtual_source
+##! experimental.access_modifiers
 #" Baby names from the Social Security Administration "
-source: baby_names is duckdb.table('https://storage.googleapis.com/malloyyo/baby_names/baby_names.parquet') 
+
+// The table path lives in malloy-config.json (virtualMap.duckdb.baby_names),
+// so this model can point at different tables per environment.
+type: baby_names_fields is {
+  state :: string,
+  gender :: string,
+  `year` :: number,
+  name :: string,
+  `number` :: number
+}
+
+source: baby_names is duckdb.virtual('baby_names')::baby_names_fields
 include {
   private: `year`, `number`
   public: 
