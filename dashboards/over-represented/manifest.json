@@ -8,7 +8,7 @@
       "type": "string",
       "control": "select",
       "options": ["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"],
-      "default": "HI"
+      "default": "NY"
     },
     {
       "name": "YEAR_START",
@@ -17,7 +17,7 @@
       "control": "range",
       "min": 1910,
       "max": 2025,
-      "default": 1990
+      "default": 1910
     },
     {
       "name": "YEAR_END",
@@ -26,15 +26,15 @@
       "control": "range",
       "min": 1910,
       "max": 2025,
-      "default": 1999
+      "default": 1930
     },
     {
       "name": "MIN_SAMPLE",
       "label": "Min regional births",
       "type": "number",
       "control": "select",
-      "options": [10,20,50,100,200],
-      "default": 20
+      "options": [10,20,50,100,200,500,1000],
+      "default": 200
     }
   ]
 }

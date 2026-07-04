@@ -5,15 +5,13 @@
 // is a `# dashboard` view with two nested, renderer-tagged views:
 //   • concentration_by_state — `# shape_map`, per-capita rate (name births per
 //     100k births in the state, so it accounts for state population/size)
-//   • over_time              — `# line_chart`, births with the name by year
+//   • over_time              — `# line_chart`, births with the name by year,
+//                              split into male / female series
 // The Malloy renderer draws both — this component only supplies the NAME filter.
 //
 // Props from the host runtime (no data libs / fetch / credentials here):
 //   manifest, givens, setGiven, Panel  (see repo dashboard guidance)
 import React from "react";
-
-// A few well-known names for one-click switching.
-const QUICK_PICKS = ["Emma", "James", "Mary", "Liam", "Olivia", "Michael", "Ashley", "Aiden"];
 
 export default function Dashboard({ manifest, givens, setGiven, Panel }) {
   // Local draft so we re-run the query on commit (Enter / blur / quick-pick),
@@ -81,28 +79,7 @@ export default function Dashboard({ manifest, givens, setGiven, Panel }) {
         </label>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 }}>
-        {QUICK_PICKS.map((n) => (
-          <button
-            key={n}
-            onClick={() => {
-              setDraft(n);
-              commit(n);
-            }}
-            style={{
-              fontSize: 13,
-              padding: "4px 10px",
-              borderRadius: 999,
-              border: "1px solid #ccc",
-              background: n === givens.NAME ? "#1a1a1a" : "white",
-              color: n === givens.NAME ? "white" : "#333",
-              cursor: "pointer",
-            }}
-          >
-            {n}
-          </button>
-        ))}
-      </div>
+      <div style={{ marginBottom: 20 }} />
 
       <Panel givens={givens} />
     </div>

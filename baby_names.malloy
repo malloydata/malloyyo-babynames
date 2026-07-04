@@ -1,10 +1,10 @@
 ##! experimental { access_modifiers givens }
 
 given:
-  STATE :: string
+  STATE :: string is 'NY'
   YEAR_START :: number is 1910
-  YEAR_END :: number is 2025
-  MIN_SAMPLE :: number is 20
+  YEAR_END :: number is 1930
+  MIN_SAMPLE :: number is 200
   NAME :: string is 'Emma'
 
 #" Baby names from the Social Security Administration "
@@ -107,6 +107,8 @@ extend {
       group_by: birth_year
       # y
       aggregate: babies_named
+      # series
+      group_by: gender
       order_by: birth_year
     }
   }
