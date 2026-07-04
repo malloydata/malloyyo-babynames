@@ -1,0 +1,13 @@
+{
+  "title": "Name explorer",
+  "query": "name_report",
+  "givens": [
+    {
+      "name": "NAME",
+      "label": "Name",
+      "type": "string",
+      "control": "text",
+      "default": "Emma"
+    }
+  ]
+}
