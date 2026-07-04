@@ -1,5 +1,5 @@
 {
-  "title": "Over- / under-represented baby names",
+  "title": "Over-represented baby names",
   "query": "over_represented_names",
   "givens": [
     {
@@ -11,19 +11,21 @@
       "default": "HI"
     },
     {
-      "name": "DECADE_START",
+      "name": "YEAR_START",
       "label": "From year",
       "type": "number",
-      "control": "select",
-      "options": [1880,1890,1900,1910,1920,1930,1940,1950,1960,1970,1980,1990,2000,2010,2020],
+      "control": "range",
+      "min": 1910,
+      "max": 2025,
       "default": 1990
     },
     {
-      "name": "DECADE_END",
+      "name": "YEAR_END",
       "label": "To year",
       "type": "number",
-      "control": "select",
-      "options": [1889,1899,1909,1919,1929,1939,1949,1959,1969,1979,1989,1999,2009,2019,2029],
+      "control": "range",
+      "min": 1910,
+      "max": 2025,
       "default": 1999
     },
     {

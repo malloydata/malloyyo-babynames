@@ -2,9 +2,10 @@
 
 given:
   STATE :: string
-  DECADE_START :: number
-  DECADE_END :: number
+  YEAR_START :: number is 1910
+  YEAR_END :: number is 2025
   MIN_SAMPLE :: number is 20
+  NAME :: string is 'Emma'
 
 #" Baby names from the Social Security Administration "
 source: baby_names is duckdb.table('https://storage.googleapis.com/malloyyo/baby_names/baby_names.parquet') 
@@ -70,17 +71,52 @@ extend {
   view: overrepresented_names is {
     group_by: name
     aggregate:
-      regional is total_babies { where: state = $STATE and birth_year >= $DECADE_START and birth_year <= $DECADE_END }
+      regional is total_babies { where: state = $STATE and birth_year >= $YEAR_START and birth_year <= $YEAR_END }
       natl is total_babies
-      overrep_index is (total_babies { where: state = $STATE and birth_year >= $DECADE_START and birth_year <= $DECADE_END } / all(total_babies { where: state = $STATE and birth_year >= $DECADE_START and birth_year <= $DECADE_END })) / (total_babies / all(total_babies))
+      overrep_index is (total_babies { where: state = $STATE and birth_year >= $YEAR_START and birth_year <= $YEAR_END } / all(total_babies { where: state = $STATE and birth_year >= $YEAR_START and birth_year <= $YEAR_END })) / (total_babies / all(total_babies))
     having: regional > $MIN_SAMPLE
     order_by: overrep_index desc
     limit: 25
   }
+
+  // Same over-represented list, split into two side-by-side columns by gender.
+  view: overrepresented_by_gender is {
+    nest: male is overrepresented_names + { where: gender = 'M' }
+    nest: female is overrepresented_names + { where: gender = 'F' }
+  }
+
+  // Per-capita rate of a name within a state: births with the name per 100,000
+  // births in that state. Dividing by the state's total births normalizes for
+  // how big the state is, so a small state can still light up the map.
+  measure:
+    name_per_100k is total_babies { where: name = $NAME } / total_babies * 100000
+    babies_named is total_babies { where: name = $NAME }
+
+  # dashboard
+  view: name_dashboard is {
+    # shape_map
+    nest: concentration_by_state is {
+      group_by: state
+      aggregate: name_per_100k
+      order_by: name_per_100k desc
+    }
+
+    # line_chart
+    nest: over_time is {
+      # x
+      group_by: birth_year
+      # y
+      aggregate: babies_named
+      order_by: birth_year
+    }
+  }
 }
 
-#" Names most concentrated in the selected state and decade range, vs. the nation "
-query: over_represented_names is baby_names -> overrepresented_names
+#" Names most concentrated in the selected state and year range, vs. the nation (male / female columns) "
+query: over_represented_names is baby_names -> overrepresented_by_gender
+
+#" One name: per-capita concentration by state (map) and popularity over time "
+query: name_report is baby_names -> name_dashboard
 
 run: baby_names -> {
   where: gender = 'F' and (state = 'GA' or state = 'AL' or state = 'MS' or state = 'SC' or state = 'TN' or state = 'LA' or state = 'AR')
