@@ -1,4 +1,11 @@
-##! experimental
+##! experimental { access_modifiers givens }
+
+given:
+  STATE :: string
+  DECADE_START :: number
+  DECADE_END :: number
+  MIN_SAMPLE :: number is 20
+
 #" Baby names from the Social Security Administration "
 source: baby_names is duckdb.table('https://storage.googleapis.com/malloyyo/baby_names/baby_names.parquet') 
 include {
@@ -59,7 +66,21 @@ extend {
     order_by: birth_year
 
   }
+
+  view: overrepresented_names is {
+    group_by: name
+    aggregate:
+      regional is total_babies { where: state = $STATE and birth_year >= $DECADE_START and birth_year <= $DECADE_END }
+      natl is total_babies
+      overrep_index is (total_babies { where: state = $STATE and birth_year >= $DECADE_START and birth_year <= $DECADE_END } / all(total_babies { where: state = $STATE and birth_year >= $DECADE_START and birth_year <= $DECADE_END })) / (total_babies / all(total_babies))
+    having: regional > $MIN_SAMPLE
+    order_by: overrep_index desc
+    limit: 25
+  }
 }
+
+#" Names most concentrated in the selected state and decade range, vs. the nation "
+query: over_represented_names is baby_names -> overrepresented_names
 
 run: baby_names -> {
   where: gender = 'F' and (state = 'GA' or state = 'AL' or state = 'MS' or state = 'SC' or state = 'TN' or state = 'LA' or state = 'AR')
