@@ -56,6 +56,13 @@ extend {
     order_by: decade
   }
 
+  # line_chart {size=spark y.independent}
+  view: births_by_year is {
+    group_by: birth_year
+    aggregate: total_babies
+    order_by: birth_year
+  }
+
   # line_chart
   view:births_by_gender is {
     # x
@@ -81,8 +88,8 @@ extend {
 
   // Same over-represented list, split into two side-by-side columns by gender.
   view: overrepresented_by_gender is {
-    nest: male is overrepresented_names + { where: gender = 'M' }
-    nest: female is overrepresented_names + { where: gender = 'F' }
+    nest: male is overrepresented_names + { where: gender = 'M' nest: births_by_year}
+    nest: female is overrepresented_names + { where: gender = 'F' nest: births_by_year}
   }
 
   // Per-capita rate of a name within a state: births with the name per 100,000
