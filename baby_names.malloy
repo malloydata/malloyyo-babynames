@@ -1,11 +1,14 @@
 ##! experimental { access_modifiers givens }
 
 given:
-  STATE :: string is 'NY'
-  YEAR_START :: number is 1910
-  YEAR_END :: number is 1930
-  MIN_SAMPLE :: number is 200
-  NAME :: string is 'Emma'
+  # label="State" control=select suggest { source=baby_names dimension=state }
+  STATE :: filter<string> is f'NY'
+  # label="Years" range_min=1910 range_max=2025
+  YEAR_RANGE :: filter<number> is f'[1910 to 1930]'
+  # label="Min regional births"
+  MIN_SAMPLE :: filter<number> is f'> 200'
+  # label="Name" suggest { source=baby_names dimension=name }
+  NAME :: filter<string> is f'Emma'
 
 #" Baby names from the Social Security Administration "
 source: baby_names is duckdb.table('https://storage.googleapis.com/malloyyo/baby_names/baby_names.parquet') 
@@ -78,10 +81,10 @@ extend {
   view: overrepresented_names is {
     group_by: name
     aggregate:
-      regional is total_babies { where: state = $STATE and birth_year >= $YEAR_START and birth_year <= $YEAR_END }
+      regional is total_babies { where: state ~ $STATE and birth_year ~ $YEAR_RANGE }
       natl is total_babies
-      overrep_index is (total_babies { where: state = $STATE and birth_year >= $YEAR_START and birth_year <= $YEAR_END } / all(total_babies { where: state = $STATE and birth_year >= $YEAR_START and birth_year <= $YEAR_END })) / (total_babies / all(total_babies))
-    having: regional > $MIN_SAMPLE
+      overrep_index is (total_babies { where: state ~ $STATE and birth_year ~ $YEAR_RANGE } / all(total_babies { where: state ~ $STATE and birth_year ~ $YEAR_RANGE })) / (total_babies / all(total_babies))
+    having: regional ~ $MIN_SAMPLE
     order_by: overrep_index desc
     limit: 25
   }
@@ -96,8 +99,8 @@ extend {
   // births in that state. Dividing by the state's total births normalizes for
   // how big the state is, so a small state can still light up the map.
   measure:
-    name_per_100k is total_babies { where: name = $NAME } / total_babies * 100000
-    babies_named is total_babies { where: name = $NAME }
+    name_per_100k is total_babies { where: name ~ $NAME } / total_babies * 100000
+    babies_named is total_babies { where: name ~ $NAME }
 
   # dashboard
   view: name_dashboard is {
@@ -122,10 +125,16 @@ extend {
 }
 
 #" Names most concentrated in the selected state and year range, vs. the nation (male / female columns) "
+# artifact name="over-represented" title="Over-represented baby names"
 query: over_represented_names is baby_names -> overrepresented_by_gender
 
 #" One name: per-capita concentration by state (map) and popularity over time "
+# artifact name="name-explorer" title="Name explorer"
 query: name_report is baby_names -> name_dashboard
+
+#" Births per year for the name, split male / female
+# artifact title="Name trend"
+query: name_trend is baby_names -> births_by_gender + { where: name ~ $NAME }
 
 run: baby_names -> {
   where: gender = 'F' and (state = 'GA' or state = 'AL' or state = 'MS' or state = 'SC' or state = 'TN' or state = 'LA' or state = 'AR')
