@@ -1,3 +1,3 @@
-import { baby_names, over_represented_names, name_report, name_trend, STATE, YEAR_RANGE, MIN_SAMPLE, NAME } from 'baby_names.malloy'
+import { baby_names, STATE, YEAR_RANGE, MIN_SAMPLE, NAME } from 'baby_names.malloy'
 
-export { baby_names, over_represented_names, name_report, name_trend, STATE, YEAR_RANGE, MIN_SAMPLE, NAME }
+export { baby_names, STATE, YEAR_RANGE, MIN_SAMPLE, NAME }

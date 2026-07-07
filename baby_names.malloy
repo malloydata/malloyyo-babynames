@@ -90,6 +90,8 @@ extend {
   }
 
   // Same over-represented list, split into two side-by-side columns by gender.
+  #" Names most concentrated in the selected state and year range, vs. the nation (male / female columns) "
+  # artifact name="over-represented" title="Over-represented baby names"
   view: overrepresented_by_gender is {
     nest: male is overrepresented_names + { where: gender = 'M' nest: births_by_year}
     nest: female is overrepresented_names + { where: gender = 'F' nest: births_by_year}
@@ -102,6 +104,8 @@ extend {
     name_per_100k is total_babies { where: name ~ $NAME } / total_babies * 100000
     babies_named is total_babies { where: name ~ $NAME }
 
+  #" One name: per-capita concentration by state (map) and popularity over time "
+  # artifact name="name-explorer" title="Name explorer"
   # dashboard
   view: name_dashboard is {
     # shape_map
@@ -122,19 +126,11 @@ extend {
       order_by: birth_year
     }
   }
+
+  #" Births per year for the name, split male / female "
+  # artifact title="Name trend"
+  view: name_trend is births_by_gender + { where: name ~ $NAME }
 }
-
-#" Names most concentrated in the selected state and year range, vs. the nation (male / female columns) "
-# artifact name="over-represented" title="Over-represented baby names"
-query: over_represented_names is baby_names -> overrepresented_by_gender
-
-#" One name: per-capita concentration by state (map) and popularity over time "
-# artifact name="name-explorer" title="Name explorer"
-query: name_report is baby_names -> name_dashboard
-
-#" Births per year for the name, split male / female
-# artifact title="Name trend"
-query: name_trend is baby_names -> births_by_gender + { where: name ~ $NAME }
 
 run: baby_names -> {
   where: gender = 'F' and (state = 'GA' or state = 'AL' or state = 'MS' or state = 'SC' or state = 'TN' or state = 'LA' or state = 'AR')
