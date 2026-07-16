@@ -6,6 +6,7 @@ import "../baby_names.malloy"
 // the JSX pulls the whole series once via useQuery and scrubs client-side.
 # artifact {title="Name over Time"}
 query: time_series_flat is baby_names -> {
+  where: birth_year < 2008
   group_by: birth_year, state
   aggregate:
     // Births with the name per 100,000 births in that state that year. The
@@ -15,4 +16,5 @@ query: time_series_flat is baby_names -> {
 } -> {
   order_by: birth_year
   select: birth_year, state, per_100k
+  limit: 10000000
 }
