@@ -1,0 +1,27 @@
+##! experimental { access_modifiers givens }
+
+import "../baby_names.malloy"
+
+
+source: baby_names_over is baby_names extend {
+
+  view: overrepresented_names is {
+    group_by: name
+    aggregate:
+      regional is total_babies { where: state ~ $STATE and birth_year ~ $YEAR_RANGE }
+      natl is total_babies
+      overrep_index is (total_babies { where: state ~ $STATE and birth_year ~ $YEAR_RANGE } / all(total_babies { where: state ~ $STATE and birth_year ~ $YEAR_RANGE })) / (total_babies / all(total_babies))
+    having: regional ~ $MIN_SAMPLE
+    order_by: overrep_index desc
+    limit: 25
+  }
+
+  // Same over-represented list, split into two side-by-side columns by gender.
+  # artifact { title="Over-represented baby names"}
+  #" Names most concentrated in the selected state and year range, vs. the nation (male / female columns) "
+  view: overrepresented_by_gender is {
+    nest: male is overrepresented_names + { where: gender = 'M' nest: births_by_year}
+    nest: female is overrepresented_names + { where: gender = 'F' nest: births_by_year}
+  }
+
+}

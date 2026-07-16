@@ -33,3 +33,4 @@ export default function Dashboard({ dashboard, givens }) {
     </div>
   );
 }
+

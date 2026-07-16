@@ -15,8 +15,6 @@ given:
 // Done once as its own query so it's cheap to join, rather than an expensive
 // windowed view recomputed on every dashboard render.
 
-
-
 #" Baby names from the Social Security Administration "
 source: baby_names_base is baby_names_table
 include {
@@ -24,7 +22,8 @@ include {
   public: 
     #" 'F' or 'M'"
     gender,
-    #" First name of the babey
+    #" First name of the baby
+    # drill { to=["name_explorer", "name_trend"] }
     name,
     #" Two letter state code
     state,
@@ -99,79 +98,12 @@ source: baby_names is baby_names_base extend {
     order_by: birth_year
 
   }
-
-  view: overrepresented_names is {
-    // Drill: click a name to open the "name-explorer" dashboard (its NAME given
-    // seeded to the clicked name). `name is concat(name,'')` is an expression so
-    // the annotation survives the `+ {…}` gender-nest refinement (malloy#2979).
-    # drill { to=["name-explorer", "name_trend"] }
-    group_by: name is concat(name, '')
-    aggregate:
-      regional is total_babies { where: state ~ $STATE and birth_year ~ $YEAR_RANGE }
-      natl is total_babies
-      overrep_index is (total_babies { where: state ~ $STATE and birth_year ~ $YEAR_RANGE } / all(total_babies { where: state ~ $STATE and birth_year ~ $YEAR_RANGE })) / (total_babies / all(total_babies))
-    having: regional ~ $MIN_SAMPLE
-    order_by: overrep_index desc
-    limit: 25
-  }
-
-  // Same over-represented list, split into two side-by-side columns by gender.
-  #" Names most concentrated in the selected state and year range, vs. the nation (male / female columns) "
-  # artifact name="over-represented" title="Over-represented baby names"
-  view: overrepresented_by_gender is {
-    nest: male is overrepresented_names + { where: gender = 'M' nest: births_by_year}
-    nest: female is overrepresented_names + { where: gender = 'F' nest: births_by_year}
-  }
-
   // Per-capita rate of a name within a state: births with the name per 100,000
   // births in that state. Dividing by the state's total births normalizes for
   // how big the state is, so a small state can still light up the map.
 
-  #" One name: per-capita concentration by state (map) and popularity over time "
-  # artifact name="name-explorer" title="Name explorer"
-  # dashboard {columns=6}
-  view: name_dashboard is {
-    
-    extend: {
-      dimension: is_name is name ~ $NAME 
-      measure:
-        name_per_100k is total_babies { where: is_name} / total_babies * 100000
-        babies_named is total_babies { where: is_name}
-        // Overall national rank of NAME (join is per-name, so max picks its value).
-        name_rank is name_facts.overall_rank.max() { where: is_name}
-    }
-    # colspan=3
-    aggregate:
-      total_births is babies_named
-      overall_rank is name_rank
 
-    # colspan=3
-    nest:
-      # break
-      # shape_map
-      concentration_by_state is {
-        group_by: state
-        aggregate: name_per_100k
-        order_by: name_per_100k desc
-      }
 
-    nest:
-      # colspan=6
-      # line_chart
-      over_time is {
-        # x
-        group_by: birth_year
-        # y
-        aggregate: babies_named
-        # series
-        group_by: gender
-        order_by: birth_year
-      }
-  }
-
-  #" Births per year for the name, split male / female "
-  # artifact title="Name trend"
-  view: name_trend is births_by_gender + { where: name ~ $NAME }
 }
 
 run: baby_names -> {

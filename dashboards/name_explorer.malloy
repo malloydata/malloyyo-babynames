@@ -1,0 +1,45 @@
+##! experimental { access_modifiers givens }
+
+import "../baby_names.malloy"
+
+#" One name: per-capita concentration by state (map) and popularity over time "
+# dashboard {columns=6}
+# artifact { title="Name explorer"}
+query: name_explorer is baby_names -> {
+  
+  extend: {
+    dimension: is_name is name ~ $NAME 
+    measure:
+      name_per_100k is total_babies { where: is_name} / total_babies * 100000
+      babies_named is total_babies { where: is_name}
+      // Overall national rank of NAME (join is per-name, so max picks its value).
+      name_rank is name_facts.overall_rank.max() { where: is_name}
+  }
+  # colspan=3
+  aggregate:
+    total_births is babies_named
+    overall_rank is name_rank
+
+  # colspan=3
+  nest:
+    # break
+    # shape_map
+    concentration_by_state is {
+      group_by: state
+      aggregate: name_per_100k
+      order_by: name_per_100k desc
+    }
+
+  nest:
+    # colspan=6
+    # line_chart
+    over_time is {
+      # x
+      group_by: birth_year
+      # y
+      aggregate: babies_named
+      # series
+      group_by: gender
+      order_by: birth_year
+    }
+}

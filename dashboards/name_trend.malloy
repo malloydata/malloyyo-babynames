@@ -1,0 +1,7 @@
+##! experimental { access_modifiers givens }
+
+import "../baby_names.malloy"
+
+## artifact { title="Name trend" tiles=["name_trend"] }
+  #" Births per year for the name, split male / female "
+query: name_trend is baby_names -> births_by_gender + { where: name ~ $NAME }
