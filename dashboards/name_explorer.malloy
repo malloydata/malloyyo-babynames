@@ -2,44 +2,38 @@
 
 import "../baby_names.malloy"
 
-#" One name: per-capita concentration by state (map) and popularity over time "
-# dashboard {columns=6}
+#" One name: headline numbers, where it's concentrated, and how it trends "
 # artifact { title="Name explorer"}
 query: name_explorer is baby_names -> {
-  
   extend: {
-    dimension: is_name is name ~ $NAME 
+    dimension: is_name is name ~ $NAME
     measure:
-      name_per_100k is total_babies { where: is_name} / total_babies * 100000
       babies_named is total_babies { where: is_name}
       // Overall national rank of NAME (join is per-name, so max picks its value).
       name_rank is name_facts.overall_rank.max() { where: is_name}
   }
-  # colspan=3
   aggregate:
     total_births is babies_named
     overall_rank is name_rank
+    // Male share OF THIS NAME (both filtered to is_name; the un-scoped version
+    // returned the all-names ~52% for every name).
+    percent_male is total_babies {where: is_name and gender = 'M'} / babies_named
+}
 
-  # colspan=3
-  nest:
-    # break
-    # shape_map
-    concentration_by_state is {
-      group_by: state
-      aggregate: name_per_100k
-      order_by: name_per_100k desc
-    }
+// Flat: per-capita concentration by state (all years). per_100k = births with
+// the name per 100,000 births in that state, which normalizes for state size.
+query: name_by_state is baby_names -> {
+  group_by: state
+  aggregate:
+    per_100k is total_babies { where: name ~ $NAME } / total_babies * 100000
+    babies_named is total_babies { where: name ~ $NAME }
+  order_by: per_100k desc
+}
 
-  nest:
-    # colspan=6
-    # line_chart
-    over_time is {
-      # x
-      group_by: birth_year
-      # y
-      aggregate: babies_named
-      # series
-      group_by: gender
-      order_by: birth_year
-    }
+// Flat: births per year for the name, split male / female.
+query: name_over_time is baby_names -> {
+  where: name ~ $NAME
+  group_by: birth_year, gender
+  aggregate: babies_named is total_babies
+  order_by: birth_year
 }

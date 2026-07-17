@@ -23,7 +23,7 @@ include {
     #" 'F' or 'M'"
     gender,
     #" First name of the baby
-    # drill { to=["name_explorer", "name_trend", "time-series"] }
+    # drill { to=["name_explorer", "time-series"] }
     name,
     #" Two letter state code
     state,

@@ -16,12 +16,19 @@ source: baby_names_over is baby_names extend {
     limit: 25
   }
 
-  // Same over-represented list, split into two side-by-side columns by gender.
+  // Declares the dashboard (title + which givens get controls). The custom
+  // component (over-represented.jsx) renders the two flat queries below rather
+  // than this nested shape.
   # artifact { title="Over-represented baby names"}
   #" Names most concentrated in the selected state and year range, vs. the nation (male / female columns) "
   view: overrepresented_by_gender is {
-    nest: male is overrepresented_names + { where: gender = 'M' nest: births_by_year}
-    nest: female is overrepresented_names + { where: gender = 'F' nest: births_by_year}
+    nest: male is overrepresented_names + { where: gender = 'M' }
+    nest: female is overrepresented_names + { where: gender = 'F' }
   }
 
 }
+
+// Flat rows for the custom component: most over-represented names for each
+// gender (name, regional births, national births, overrep_index).
+query: overrep_male is baby_names_over -> overrepresented_names + { where: gender = 'M' }
+query: overrep_female is baby_names_over -> overrepresented_names + { where: gender = 'F' }
