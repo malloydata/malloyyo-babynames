@@ -37,3 +37,69 @@ query: name_over_time is baby_names -> {
   aggregate: babies_named is total_babies
   order_by: birth_year
 }
+
+// baby_names carrying the target name's "signature" as joined scalars, so every
+// candidate name can be scored against it in one pass:
+//   dsig.target_decade   — the decade NAME peaks in (by total births)
+//   ssig.target_state    — the state NAME is most concentrated in per-capita
+//                          (name births / all births in state — size-normalized;
+//                          floored at 200 name-births so a tiny state can't top
+//                          the ranking on noise)
+//   nsig.target_national — NAME's national total, for popularity matching
+source: names_vs_target is baby_names extend {
+  join_one: dsig is (
+    baby_names -> { where: name ~ $NAME; group_by: decade; aggregate: b is total_babies; order_by: b desc; limit: 1 }
+    -> { select: target_decade is decade }
+  ) on true
+  join_one: ssig is (
+    baby_names -> {
+      group_by: state
+      aggregate:
+        pc is total_babies { where: name ~ $NAME } / total_babies
+        named is total_babies { where: name ~ $NAME }
+      having: named > 200
+      order_by: pc desc
+      limit: 1
+    }
+    -> { select: target_state is state }
+  ) on true
+  join_one: nsig is (
+    baby_names -> { where: name ~ $NAME; aggregate: target_national is total_babies }
+  ) on true
+  measure:
+    // scalar copies of the joined signature (usable in aggregate expressions)
+    target_n is nsig.target_national.max()
+    peak_decade is dsig.target_decade.max()
+    // how much of a candidate's births fall in NAME's peak decade / top state
+    decade_share is total_babies { where: decade = dsig.target_decade } / total_babies
+    state_share is total_babies { where: state = ssig.target_state } / total_babies
+    // 1.0 when a candidate is exactly as popular as NAME, falling off as they diverge
+    pop_ratio is pick total_babies / target_n when total_babies < target_n
+                 else target_n / total_babies
+    // equal blend: era-fit x state-fit x fame-fit
+    match_score is decade_share * state_share * pop_ratio
+}
+
+// "Similar names" (same gender) and "might be married to" (opposite gender) for
+// NAME: names that peak in the same decade, concentrate in the same state, and
+// were about as popular nationally. Two rows (F / M); each nests its ranked top 8.
+query: similar_names is names_vs_target -> {
+  where: not (name ~ $NAME)
+  group_by: gender
+  nest: names is {
+    group_by: name
+    aggregate: cohort is total_babies, match_score
+    having: total_babies > 3000
+    order_by: match_score desc
+    limit: 18
+  }
+}
+
+// One-row header for the tile: NAME's peak decade, most-concentrated state, and
+// the national total its peers are matched against.
+query: name_signature is names_vs_target -> {
+  group_by: top_state is ssig.target_state
+  aggregate:
+    peak_decade
+    national is total_babies { where: name ~ $NAME }
+}
