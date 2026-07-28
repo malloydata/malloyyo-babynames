@@ -1,6 +1,6 @@
 ##! experimental { access_modifiers givens }
 
-import "../baby_names.malloy"
+import "../index.malloy"
 
 
 source: baby_names_over is baby_names extend {

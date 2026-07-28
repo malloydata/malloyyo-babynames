@@ -1,6 +1,35 @@
 ##! experimental { access_modifiers givens }
 
-import "../baby_names.malloy"
+import "../index.malloy"
+
+// Scoring weights for the "Possible Classmates" tile — the exponent each match
+// dimension gets in `match_score` (0 = ignore that dimension entirely, 1 = the
+// old equal blend, 3 = be very picky about it). Declared HERE, not in the model,
+// because nothing outside this dashboard scores names. The sliders live in
+// name_explorer.jsx and are passed per-query, so moving one re-runs only
+// `similar_names`.
+given:
+  # label="Name frequency" range_min=0 range_max=3 step=0.1
+  W_FREQ :: number is 1.0
+  # label="Location" range_min=0 range_max=3 step=0.1
+  W_PLACE :: number is 1.0
+  # label="Time" range_min=0 range_max=3 step=0.1
+  W_TIME :: number is 1.0
+
+// What "same place" and "same time" mean when the user isolates them by clicking
+// the map / the decade rail. Each pair is a filter plus an ON flag: an EMPTY
+// filter matches every row (f'' is "all"), so there's no way to ask "did the
+// user pick anything?" from the filter alone — the flag is what lets the score
+// fall back to the name's OWN peak decade / top state when nothing is selected.
+given:
+  # label="Isolated states"
+  FOCUS_STATE :: filter<string> is f''
+  # label="States isolated?"
+  USE_FOCUS_STATE :: boolean is false
+  # label="Isolated years"
+  FOCUS_YEARS :: filter<number> is f''
+  # label="Years isolated?"
+  USE_FOCUS_YEARS :: boolean is false
 
 #" One name: headline numbers, where it's concentrated, and how it trends "
 # artifact { title="Name explorer"}
@@ -66,29 +95,44 @@ source: names_vs_target is baby_names extend {
   join_one: nsig is (
     baby_names -> { where: name ~ $NAME; aggregate: target_national is total_babies }
   ) on true
+  // "Same time" / "same place" — the isolated years/states when the dashboard
+  // has a selection, otherwise NAME's own peak decade and top state.
+  dimension:
+    in_focus_time is
+      pick birth_year ~ $FOCUS_YEARS when $USE_FOCUS_YEARS
+      else decade = dsig.target_decade
+    in_focus_place is
+      pick state ~ $FOCUS_STATE when $USE_FOCUS_STATE
+      else state = ssig.target_state
+
   measure:
     // scalar copies of the joined signature (usable in aggregate expressions)
     target_n is nsig.target_national.max()
     peak_decade is dsig.target_decade.max()
-    // how much of a candidate's births fall in NAME's peak decade / top state
-    decade_share is total_babies { where: decade = dsig.target_decade } / total_babies
-    state_share is total_babies { where: state = ssig.target_state } / total_babies
+    // how much of a candidate's births fall in the focused era / place
+    time_fit is total_babies { where: in_focus_time } / total_babies
+    place_fit is total_babies { where: in_focus_place } / total_babies
     // 1.0 when a candidate is exactly as popular as NAME, falling off as they diverge
-    pop_ratio is pick total_babies / target_n when total_babies < target_n
-                 else target_n / total_babies
-    // equal blend: era-fit x state-fit x fame-fit
-    match_score is decade_share * state_share * pop_ratio
+    freq_fit is pick total_babies / target_n when total_babies < target_n
+                else target_n / total_babies
+    // Weighted blend of era-fit x place-fit x fame-fit. Each weight is the
+    // EXPONENT on its factor, so the product stays a 0..1 score and the sliders
+    // read as "how much does this dimension matter": 0 drops the factor out
+    // entirely (x^0 = 1), 1 is the plain equal blend, 3 is very picky.
+    match_score is pow(time_fit, $W_TIME) * pow(place_fit, $W_PLACE) * pow(freq_fit, $W_FREQ)
 }
 
-// "Similar names" (same gender) and "might be married to" (opposite gender) for
-// NAME: names that peak in the same decade, concentrate in the same state, and
-// were about as popular nationally. Two rows (F / M); each nests its ranked top 8.
+// "Possible Classmates": names that peak in the same decade, concentrate in the
+// same state, and were about as popular nationally as NAME — same gender
+// (classmates) and opposite gender (might be married to). Two rows (F / M); each
+// nests its ranked top 18, with the three component fits so the UI can say WHY a
+// name matched. This is the only query the weight sliders re-run.
 query: similar_names is names_vs_target -> {
   where: not (name ~ $NAME)
   group_by: gender
   nest: names is {
     group_by: name
-    aggregate: cohort is total_babies, match_score
+    aggregate: cohort is total_babies, match_score, time_fit, place_fit, freq_fit
     having: total_babies > 3000
     order_by: match_score desc
     limit: 18

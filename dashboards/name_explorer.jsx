@@ -1,8 +1,10 @@
 // @ts-nocheck
-// Name explorer — headline numbers for one name, where it's most concentrated
-// per-capita (ranked states), and how it trends over time. Full React/JS: pulls
-// three flat queries (name_explorer / name_by_state / name_over_time) via
-// useQuery and draws Vega-Lite. No Malloy renderer / <Panel>. The animated
+// Name explorer — headline numbers for one name, its "Possible Classmates"
+// (names from the same era / place / popularity band, re-scorable with the three
+// importance sliders), where it's most concentrated per-capita, and how it
+// trends over time. Full React/JS: pulls the dashboard's queries via useQuery
+// and draws Vega-Lite. The weight sliders are passed ONLY to the similar_names
+// query, so re-scoring re-runs that one query. No Malloy renderer / <Panel>. The animated
 // choropleth version of the geographic view lives in the `time-series`
 // dashboard; here a ranked bar reads the "which states" question more directly.
 //
@@ -25,8 +27,14 @@ const SERIES = {
   dark: { F: "#d55181", M: "#3987e5" },
 };
 const INK = {
-  light: { surface: "#fcfcfb", grid: "#e1e0d9", axis: "#c3c2b7", muted: "#898781", text: "#0b0b0b", text2: "#52514e", bar: "#2a78d6" },
-  dark: { surface: "#1a1a19", grid: "#2c2c2a", axis: "#383835", muted: "#898781", text: "#ffffff", text2: "#c3c2b7", bar: "#3987e5" },
+  light: { surface: "#fcfcfb", grid: "#e1e0d9", axis: "#c3c2b7", muted: "#898781", text: "#0b0b0b", text2: "#52514e", bar: "#2a78d6", panel: "#f4f3ef", track: "#e1e0d9" },
+  dark: { surface: "#1a1a19", grid: "#2c2c2a", axis: "#383835", muted: "#898781", text: "#ffffff", text2: "#c3c2b7", bar: "#3987e5", panel: "#212120", track: "#343432" },
+};
+// One hue per scoring dimension, reused by the slider and its column of chips so
+// "which knob moved this" reads at a glance.
+const WEIGHT_HUES = {
+  light: { freq: "#2a78d6", place: "#2e9e83", time: "#9a63d4" },
+  dark: { freq: "#3987e5", place: "#35b394", time: "#b483e6" },
 };
 
 function relLum(c) {
@@ -55,7 +63,12 @@ function useTheme() {
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class", "style"] });
     return () => { mq.removeEventListener("change", read); obs.disconnect(); };
   }, []);
-  return { dark, ink: dark ? INK.dark : INK.light, series: dark ? SERIES.dark : SERIES.light };
+  return {
+    dark,
+    ink: dark ? INK.dark : INK.light,
+    series: dark ? SERIES.dark : SERIES.light,
+    hues: dark ? WEIGHT_HUES.dark : WEIGHT_HUES.light,
+  };
 }
 
 function useWidth(fallback) {
@@ -89,6 +102,14 @@ function vegaConfig(ink) {
 
 const num = (x) => (x == null || x === "" ? 0 : +x);
 
+// "#2a78d6" + 0.2 -> "rgba(42,120,214,0.2)" (chip tints over either theme).
+function withAlpha(hex, a) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return hex;
+  const h = m[1];
+  return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a.toFixed(3)})`;
+}
+
 function Card({ ink, children, style }) {
   return (
     <div style={{
@@ -120,6 +141,23 @@ function Figure({ ink, title, note, height, data, buildSpec }) {
   );
 }
 
+// The trend line on its own (Figure's chart half, without the card) so its card
+// can carry the decade rail underneath it.
+function TimeChart({ ink, series, rows, band }) {
+  const [ref, w] = useWidth(640);
+  return (
+    <div ref={ref}>
+      <VegaChart
+        spec={genderLineSpec({
+          width: Math.max(w - 32, 260), height: 200, ink, series,
+          yField: "babies_named", yTitle: "Births / year", band,
+        })}
+        data={rows}
+      />
+    </div>
+  );
+}
+
 function StatTile({ ink, label, value, sub }) {
   return (
     <Card ink={ink} style={{ flex: "1 1 150px", minWidth: 140 }}>
@@ -148,7 +186,21 @@ function barSpec({ width, height, ink, xField, yField, xTitle, valueTitle, extra
 }
 
 // Layered gender line + invisible nearest-point hover layer carrying the tooltip.
-function genderLineSpec({ width, height, ink, series, yField, yTitle }) {
+// `band` ({from,to} years) paints the isolated period as a grey wash BEHIND the
+// lines — the chart's echo of what the decade rail has selected.
+function genderLineSpec({ width, height, ink, series, yField, yTitle, band }) {
+  const bandLayer = band
+    ? [{
+        mark: { type: "rect", opacity: 1 },
+        encoding: {
+          x: { datum: band.from }, x2: { datum: band.to },
+          // pixel-space y overrides the inherited quantitative y, so the wash
+          // spans the full plot height instead of tracking the births scale
+          y: { value: 0 }, y2: { value: height },
+          color: { value: withAlpha(ink.text, ink.surface === INK.dark.surface ? 0.14 : 0.1) },
+        },
+      }]
+    : [];
   return {
     width, height, background: "transparent", config: vegaConfig(ink),
     encoding: {
@@ -162,6 +214,7 @@ function genderLineSpec({ width, height, ink, series, yField, yTitle }) {
                          labelExpr: "datum.label === 'F' ? 'Female' : 'Male'" } },
     },
     layer: [
+      ...bandLayer,
       { mark: { type: "line", strokeWidth: 2, interpolate: "monotone" } },
       {
         params: [{ name: "hover", select: { type: "point", fields: ["birth_year"], nearest: true, on: "pointerover", clear: "pointerout" } }],
@@ -178,11 +231,127 @@ function genderLineSpec({ width, height, ink, series, yField, yTitle }) {
     ],
   };
 }
-// A clickable name chip — drills the dashboard to that name (seeds the NAME given).
-function PeerChip({ ink, name, sub }) {
+/* ------------------------- Possible Classmates tile ------------------------ */
+// The three scoring dimensions, in slider order. `key` matches the React state
+// and `given` the number given in name_explorer.malloy that it feeds.
+const WEIGHTS = [
+  { key: "freq", given: "W_FREQ", label: "Name Frequency" },
+  { key: "place", given: "W_PLACE", label: "Location" },
+  { key: "time", given: "W_TIME", label: "Time" },
+];
+const W_DEFAULT = { freq: 1, place: 1, time: 1 };
+const W_MAX = 3;
+
+// Range inputs can only be restyled through pseudo-elements, so the track/thumb
+// live in a stylesheet and each slider passes its color + fill in as CSS vars.
+const SLIDER_CSS = `
+.pc-slider{-webkit-appearance:none;appearance:none;width:100%;height:18px;margin:0;padding:0;background:transparent;cursor:pointer;display:block}
+.pc-slider:focus{outline:none}
+.pc-slider::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:linear-gradient(to right,var(--pc-accent) 0 var(--pc-fill),var(--pc-track) var(--pc-fill) 100%)}
+.pc-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;margin-top:-5px;border-radius:50%;background:var(--pc-surface);border:2px solid var(--pc-accent);box-shadow:0 1px 2px rgba(0,0,0,.28);transition:transform 90ms ease}
+.pc-slider:hover::-webkit-slider-thumb,.pc-slider:active::-webkit-slider-thumb{transform:scale(1.15)}
+.pc-slider:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px var(--pc-track),0 1px 2px rgba(0,0,0,.28)}
+.pc-slider::-moz-range-track{height:6px;border-radius:999px;background:var(--pc-track)}
+.pc-slider::-moz-range-progress{height:6px;border-radius:999px;background:var(--pc-accent)}
+.pc-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--pc-surface);border:2px solid var(--pc-accent);box-shadow:0 1px 2px rgba(0,0,0,.28)}
+`;
+
+// `hint` is the dimension's CURRENT TARGET — the isolated states / period when
+// a chart has a selection, otherwise the name's own top state and peak decade.
+// `isolated` marks it as a user pick rather than the automatic default.
+function WeightSlider({ ink, accent, label, hint, isolated, value, onChange }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 7 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: ink.text }}>{label}</span>
+        <span style={{
+          fontSize: 10.5, fontWeight: 600, letterSpacing: 0.3, fontVariantNumeric: "tabular-nums",
+          padding: "1px 6px", borderRadius: 999, color: value === 0 ? ink.muted : accent,
+          background: value === 0 ? "transparent" : ink.surface,
+          border: "1px solid " + (value === 0 ? "transparent" : ink.grid),
+        }}>{value === 0 ? "IGNORED" : `${value.toFixed(1)}×`}</span>
+      </div>
+      <input
+        className="pc-slider"
+        type="range" min={0} max={W_MAX} step={0.1} value={value}
+        aria-label={`${label} importance`}
+        onChange={(e) => onChange(+e.target.value)}
+        style={{
+          "--pc-accent": accent, "--pc-track": ink.track, "--pc-surface": ink.surface,
+          "--pc-fill": `${(value / W_MAX) * 100}%`,
+        }}
+      />
+      <div style={{
+        fontSize: 11, marginTop: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        color: value === 0 ? ink.muted : isolated ? ink.text : ink.text2,
+        fontWeight: isolated ? 600 : 400,
+      }} title={hint}>
+        {isolated ? <span style={{ color: accent, marginRight: 4 }}>&#9679;</span> : null}
+        {hint}
+      </div>
+    </div>
+  );
+}
+
+// The slider strip. Sliding only touches the peers query — see Dashboard().
+// `hints` carries what each dimension is currently matching AGAINST, so the
+// Location and Time sliders read out the map / decade-rail selection.
+function WeightPanel({ ink, hues, weights, hints, onChange, onReset, busy, isolated }) {
+  // One reset for everything that shapes the score: the weights AND any states /
+  // period isolated on the charts.
+  const dirty = isolated || WEIGHTS.some((w) => weights[w.key] !== W_DEFAULT[w.key]);
+  return (
+    <div style={{
+      background: ink.panel, border: "1px solid " + ink.grid, borderRadius: 10,
+      padding: "13px 15px 14px", margin: "0 0 18px",
+    }}>
+      <style>{SLIDER_CSS}</style>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 11 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", color: ink.muted }}>
+          What makes a classmate
+          <span style={{
+            marginLeft: 8, textTransform: "none", letterSpacing: 0, fontWeight: 500,
+            opacity: busy ? 1 : 0, transition: "opacity 140ms ease", color: ink.muted,
+          }}>re-scoring&hellip;</span>
+        </span>
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={!dirty}
+          style={{
+            font: "inherit", fontSize: 11, padding: "2px 8px", borderRadius: 999,
+            border: "1px solid " + (dirty ? ink.grid : "transparent"),
+            background: "transparent", color: dirty ? ink.text2 : "transparent",
+            cursor: dirty ? "pointer" : "default", transition: "color 120ms ease, border-color 120ms ease",
+          }}
+        >Reset</button>
+      </div>
+      <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))" }}>
+        {WEIGHTS.map((w) => (
+          <WeightSlider
+            key={w.key}
+            ink={ink}
+            accent={hues[w.key]}
+            label={w.label}
+            hint={(hints[w.key] || {}).text}
+            isolated={(hints[w.key] || {}).isolated}
+            value={weights[w.key]}
+            onChange={(v) => onChange(w.key, v)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// A clickable name chip — drills the dashboard to that name (seeds the NAME
+// given). `strength` (0..1, relative to the best match in its column) paints the
+// chip's fill, so the ranking is visible without reading the order.
+function PeerChip({ ink, accent, name, sub, strength }) {
   const [hover, setHover] = React.useState(false);
   const drill = () =>
     parent.postMessage({ type: "navigate", dashboard: "name_explorer", givens: { NAME: filters.oneOf(name) } }, "*");
+  const tint = 0.06 + 0.26 * strength; // strongest match ~a third-opacity wash
   return (
     <button
       type="button"
@@ -191,19 +360,21 @@ function PeerChip({ ink, name, sub }) {
       onMouseLeave={() => setHover(false)}
       title={sub ? `${name} — ${sub}` : name}
       style={{
-        font: "inherit", cursor: "pointer", padding: "3px 9px", borderRadius: 7,
-        border: "1px solid " + (hover ? "var(--dash-accent)" : "var(--dash-border)"),
-        background: hover ? "var(--dash-accent)" : "var(--dash-chip-bg, " + ink.surface + ")",
-        color: hover ? "var(--dash-accent-fg, #fff)" : ink.text2,
-        fontSize: 12.5, lineHeight: 1.35, whiteSpace: "nowrap",
+        font: "inherit", cursor: "pointer", padding: "4px 10px", borderRadius: 999,
+        border: "1px solid " + (hover ? "var(--dash-accent)" : ink.grid),
+        background: hover ? "var(--dash-accent)" : withAlpha(accent, tint),
+        color: hover ? "var(--dash-accent-fg, #fff)" : ink.text,
+        fontSize: 12.5, lineHeight: 1.35, whiteSpace: "nowrap", fontWeight: 500,
         transition: "border-color 100ms ease, background 100ms ease, color 100ms ease",
       }}
     >{name}</button>
   );
 }
 
-// One labeled column of peer chips.
-function PeerColumn({ ink, label, note, names, loading }) {
+// One labeled column of peer chips. Chips stay on screen (dimmed) while a new
+// score is running, so the tile never flashes empty mid-slide.
+function PeerColumn({ ink, accent, label, note, names, loading, stale }) {
+  const best = names.length ? names[0].score || 0 : 0;
   return (
     <div style={{ flex: "1 1 260px", minWidth: 240 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -211,10 +382,22 @@ function PeerColumn({ ink, label, note, names, loading }) {
         {names.length ? <span style={{ fontSize: 11, color: ink.muted }}>{names.length}</span> : null}
       </div>
       {note && <div style={{ fontSize: 11.5, color: ink.muted, margin: "2px 0 9px" }}>{note}</div>}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 5,
+        opacity: stale ? 0.45 : 1, transition: "opacity 160ms ease",
+      }}>
         {names.length
-          ? names.map((n) => <PeerChip key={n.name} ink={ink} name={n.name} sub={n.sub} />)
-          : <span style={{ fontSize: 12, color: ink.muted }}>{loading ? "Finding peers…" : "Not enough data"}</span>}
+          ? names.map((n) => (
+              <PeerChip
+                key={n.name}
+                ink={ink}
+                accent={accent}
+                name={n.name}
+                sub={n.sub}
+                strength={best > 0 ? Math.min(1, (n.score || 0) / best) : 0}
+              />
+            ))
+          : <span style={{ fontSize: 12, color: ink.muted }}>{loading ? "Finding classmates…" : "Not enough data"}</span>}
       </div>
     </div>
   );
@@ -266,14 +449,52 @@ function NameField({ ink }) {
     </div>
   );
 }
-// Compact per-capita choropleth — same identity-projection geoshape as the
-// `time-series` map, but static (one value per state) and sized to its column.
-function StateMap({ ink, rows, note }) {
-  const [ref, w] = useWidth(440);
-  const features = React.useMemo(() => {
-    const byFips = {};
-    for (const r of rows || []) { const f = ABBR_TO_FIPS[r.state]; if (f) byFips[f] = num(r.per_100k); }
-    return US_FEATURES.map((ft) => ({ ...ft, properties: { ...ft.properties, value: byFips[ft.id] ?? null } }));
+/* ------------------------ isolate: map + decade rail ----------------------- */
+// <VegaChart> has no way to hand a selection back to React (it owns the vega
+// View and exposes no signal listener), so the map is drawn as plain SVG
+// instead: the embedded GeoJSON is ALREADY in flat screen coordinates, so a
+// viewBox does every bit of the scaling the identity projection used to do, and
+// each state is just a <path> with an onClick.
+const FIPS_TO_ABBR = Object.fromEntries(Object.entries(ABBR_TO_FIPS).map(([a, f]) => [f, a]));
+const US_PATHS = (() => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const paths = US_FEATURES.map((ft) => {
+    const polys = ft.geometry.type === "Polygon" ? [ft.geometry.coordinates] : ft.geometry.coordinates;
+    let d = "";
+    for (const poly of polys) {
+      for (const ring of poly) {
+        ring.forEach(([x, y], i) => {
+          if (x < x0) x0 = x; if (x > x1) x1 = x;
+          if (y < y0) y0 = y; if (y > y1) y1 = y;
+          d += (i ? "L" : "M") + x + "," + y;
+        });
+        d += "Z";
+      }
+    }
+    return { fips: ft.id, abbr: FIPS_TO_ABBR[ft.id], name: ft.properties.name, d };
+  });
+  return { paths, box: [x0, y0, x1 - x0, y1 - y0] };
+})();
+
+// Sequential blues, interpolated in JS (no vega scale to borrow).
+const BLUES = ["#eff6fc", "#cfe1f2", "#9fc7e4", "#6aa8d5", "#3782c1", "#0d5aa7"];
+function rampColor(v, max, ink) {
+  if (v == null || !(v > 0) || !(max > 0)) return ink.grid;
+  const t = Math.min(1, v / max) * (BLUES.length - 1);
+  const i = Math.min(BLUES.length - 2, Math.floor(t));
+  const f = t - i;
+  const lo = BLUES[i], hi = BLUES[i + 1];
+  const ch = (o) => Math.round(parseInt(lo.slice(o, o + 2), 16) * (1 - f) + parseInt(hi.slice(o, o + 2), 16) * f);
+  return `rgb(${ch(1)},${ch(3)},${ch(5)})`;
+}
+
+// Per-capita choropleth. Click a state to isolate it; click again to drop it.
+function StateMap({ ink, rows, note, selected, onToggle, onClear }) {
+  const [hover, setHover] = React.useState(null);
+  const byFips = React.useMemo(() => {
+    const m = {};
+    for (const r of rows || []) { const f = ABBR_TO_FIPS[r.state]; if (f) m[f] = num(r.per_100k); }
+    return m;
   }, [rows]);
   // 95th-percentile domain so one sparse small state doesn't wash out the map.
   const domainMax = React.useMemo(() => {
@@ -283,53 +504,225 @@ function StateMap({ ink, rows, note }) {
     vals.sort((a, b) => a - b);
     return vals[Math.floor(vals.length * 0.95)] || vals[vals.length - 1] || 1;
   }, [rows]);
-  const spec = React.useMemo(() => {
-    // Fit to the column width, but cap the height so the map stays compact
-    // (the US bbox is ~760x460); scale down and center when height-bound.
-    const avail = Math.max(w - 32, 260);
-    const MAP_MAX_H = 200;
-    const k = Math.min(avail / 760, MAP_MAX_H / 460);
-    const Wd = Math.round(760 * k);
-    const mapH = Math.round(460 * k);
-    return {
-      width: Wd, height: mapH + 26, background: "transparent", config: vegaConfig(ink),
-      projection: { type: "identity", scale: 0.62 * k, translate: [46 * k, 34 * k] },
-      mark: { type: "geoshape", stroke: ink.surface, strokeWidth: 0.6 },
-      encoding: {
-        color: {
-          condition: { test: "datum.properties.value === null", value: ink.grid },
-          field: "properties.value", type: "quantitative",
-          scale: { scheme: "blues", domain: [0, domainMax], clamp: true },
-          // Horizontal strip below the map — full width, so the one-line title fits.
-          legend: {
-            title: "Per 100k births", format: "~s", orient: "none", direction: "horizontal",
-            legendX: 4, legendY: mapH + 2,
-            gradientLength: Math.round(Math.min(Wd * 0.55, 170)), gradientThickness: 8,
-            titleColor: ink.text2, labelColor: ink.text2, titleFontSize: 10, labelFontSize: 9,
-          },
-        },
-        tooltip: [
-          { field: "properties.name", type: "nominal", title: "State" },
-          { field: "properties.value", type: "quantitative", title: "Per 100K", format: ",.0f" },
-        ],
-      },
-    };
-  }, [features, domainMax, w, ink]);
+
+  const sel = new Set(selected);
+  const box = US_PATHS.box;
   return (
     <Card ink={ink}>
       <SectionTitle ink={ink} note={note}>Where it&rsquo;s concentrated</SectionTitle>
-      <div ref={ref} style={{ display: "flex", justifyContent: "center" }}><VegaChart spec={spec} data={features} /></div>
+      <svg
+        viewBox={box.join(" ")}
+        style={{ width: "100%", height: "auto", display: "block", overflow: "visible" }}
+        role="img"
+        aria-label="Per-capita concentration by state — click a state to isolate it"
+      >
+        {US_PATHS.paths.map((p) => {
+          const on = sel.has(p.abbr);
+          const v = byFips[p.fips];
+          return (
+            <path
+              key={p.fips}
+              d={p.d}
+              fill={rampColor(v, domainMax, ink)}
+              stroke={on ? "var(--dash-accent)" : hover === p.fips ? ink.text2 : ink.surface}
+              strokeWidth={on ? 2.4 : hover === p.fips ? 1.6 : 0.7}
+              vectorEffect="non-scaling-stroke"
+              opacity={sel.size && !on ? 0.42 : 1}
+              onClick={() => onToggle(p.abbr)}
+              onMouseEnter={() => setHover(p.fips)}
+              onMouseLeave={() => setHover((h) => (h === p.fips ? null : h))}
+              style={{ cursor: "pointer", transition: "opacity 140ms ease" }}
+            >
+              <title>{`${p.name} — ${v == null ? "no data" : Math.round(v).toLocaleString() + " per 100k"}`}</title>
+            </path>
+          );
+        })}
+      </svg>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+        <Ramp ink={ink} label="Per 100k births" />
+        <div style={{ flex: 1 }} />
+        {sel.size ? (
+          <ClearPill ink={ink} onClear={onClear}>
+            {selected.join(", ")}
+          </ClearPill>
+        ) : (
+          <span style={{ fontSize: 11, color: ink.muted }}>Click states to isolate</span>
+        )}
+      </div>
     </Card>
   );
+}
+
+function Ramp({ ink, label }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+      <span style={{ fontSize: 10.5, color: ink.text2 }}>{label}</span>
+      <span style={{
+        width: 78, height: 8, borderRadius: 999,
+        background: `linear-gradient(to right, ${BLUES.join(",")})`,
+      }} />
+    </div>
+  );
+}
+
+// The "you have isolated something — click to undo" pill, shared by both charts.
+function ClearPill({ ink, onClear, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClear}
+      title="Clear this selection"
+      style={{
+        font: "inherit", fontSize: 11.5, fontWeight: 600, cursor: "pointer",
+        display: "inline-flex", alignItems: "center", gap: 6,
+        padding: "3px 8px", borderRadius: 999,
+        border: "1px solid var(--dash-accent)", background: "transparent",
+        color: "var(--dash-accent)",
+      }}
+    >{children}<span style={{ fontSize: 13, lineHeight: 1, opacity: 0.75 }}>&times;</span></button>
+  );
+}
+
+// Births-per-decade histogram under the trend line. Click a bar to isolate that
+// decade; drag across bars for a span. Commits on pointer-up so a drag is one
+// re-run, not one per bar crossed.
+function DecadeRail({ ink, accent, rows, sel, onChange, onPreview }) {
+  const [drag, setDrag] = React.useState(null);
+  // Mirror the in-progress drag up to the line chart so its grey band follows
+  // the pointer, then hand back to the committed selection on release.
+  React.useEffect(() => {
+    if (!onPreview) return;
+    onPreview(drag ? { from: Math.min(drag.a, drag.b), to: Math.max(drag.a, drag.b) + 9 } : null);
+  }, [drag]); // eslint-disable-line
+  const decades = React.useMemo(() => {
+    const m = new Map();
+    for (const r of rows || []) {
+      const d = Math.floor(num(r.birth_year) / 10) * 10;
+      m.set(d, (m.get(d) || 0) + num(r.babies_named));
+    }
+    if (!m.size) return [];
+    const ks = [...m.keys()];
+    const out = [];
+    for (let d = Math.min(...ks); d <= Math.max(...ks); d += 10) out.push({ decade: d, births: m.get(d) || 0 });
+    return out;
+  }, [rows]);
+  if (!decades.length) return null;
+
+  const peak = Math.max(...decades.map((d) => d.births), 1);
+  const span = drag
+    ? { lo: Math.min(drag.a, drag.b), hi: Math.max(drag.a, drag.b) }
+    : sel
+      ? { lo: Math.floor(sel.from / 10) * 10, hi: Math.floor(sel.to / 10) * 10 }
+      : null;
+  const inSpan = (d) => span && d >= span.lo && d <= span.hi;
+
+  const commit = () => {
+    if (!drag) return;
+    const lo = Math.min(drag.a, drag.b), hi = Math.max(drag.a, drag.b);
+    setDrag(null);
+    // Re-picking exactly what's already isolated clears it.
+    if (sel && Math.floor(sel.from / 10) * 10 === lo && Math.floor(sel.to / 10) * 10 === hi) onChange(null);
+    else onChange({ from: lo, to: hi + 9 });
+  };
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: ink.muted }}>Click or drag the decades to isolate a period</span>
+        {sel ? <ClearPill ink={ink} onClear={() => onChange(null)}>{yearsLabel(sel)}</ClearPill> : null}
+      </div>
+      <div
+        style={{ display: "flex", gap: 3, alignItems: "flex-end", userSelect: "none", touchAction: "none" }}
+        onPointerUp={commit}
+        onPointerLeave={() => setDrag(null)}
+      >
+        {decades.map((d) => {
+          const on = inSpan(d.decade);
+          return (
+            <div
+              key={d.decade}
+              onPointerDown={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); setDrag({ a: d.decade, b: d.decade }); }}
+              onPointerEnter={() => setDrag((s) => (s ? { ...s, b: d.decade } : s))}
+              title={`${d.decade}s — ${Math.round(d.births).toLocaleString()} births`}
+              style={{ flex: "1 1 0", minWidth: 0, cursor: "pointer" }}
+            >
+              <div style={{ height: 34, display: "flex", alignItems: "flex-end" }}>
+                <div style={{
+                  width: "100%", height: `${Math.max(3, (d.births / peak) * 34)}px`,
+                  borderRadius: "3px 3px 0 0",
+                  background: on ? accent : withAlpha(accent, 0.28),
+                  transition: "background 120ms ease",
+                }} />
+              </div>
+              <div style={{
+                height: 3, borderRadius: 999, marginTop: 3,
+                background: on ? "var(--dash-accent)" : "transparent",
+              }} />
+              <div style={{
+                fontSize: 9.5, textAlign: "center", marginTop: 3,
+                color: on ? ink.text : ink.muted, fontVariantNumeric: "tabular-nums",
+              }}>{`'${String(d.decade).slice(2)}`}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// "the 1990s" for one decade, "1990–2009" for a span.
+function yearsLabel(sel) {
+  if (!sel) return null;
+  const lo = Math.floor(sel.from / 10) * 10, hi = Math.floor(sel.to / 10) * 10;
+  return lo === hi ? `the ${lo}s` : `${lo}–${hi + 9}`;
 }
 /* ========================== end shared viz kit ========================= */
 
 export default function Dashboard({ dashboard, givens }) {
-  const { ink, series } = useTheme();
+  const { ink, series, hues } = useTheme();
+
+  // Classmate scoring weights. `draft` follows the thumb (so the slider is
+  // smooth); `applied` lags it by a beat and is the only thing the query sees,
+  // so a drag costs one re-run instead of forty.
+  const [draft, setDraft] = React.useState(W_DEFAULT);
+  const [applied, setApplied] = React.useState(W_DEFAULT);
+  React.useEffect(() => {
+    if (WEIGHTS.every((w) => draft[w.key] === applied[w.key])) return undefined;
+    const t = setTimeout(() => setApplied(draft), 260);
+    return () => clearTimeout(t);
+  }, [draft, applied]);
+
+  // Chart selections: states clicked on the map, and a period dragged on the
+  // decade rail. Empty/null = fall back to the name's own top state / peak
+  // decade (the USE_FOCUS_* flags below are how the query tells the difference,
+  // since an empty filter matches everything).
+  const [selStates, setSelStates] = React.useState([]);
+  const [selYears, setSelYears] = React.useState(null);
+  // The span under the pointer mid-drag — chart-only, never sent to a query.
+  const [previewYears, setPreviewYears] = React.useState(null);
+  const toggleState = (abbr) =>
+    setSelStates((s) => (s.includes(abbr) ? s.filter((x) => x !== abbr) : [...s, abbr]));
+  const resetAll = () => { setDraft(W_DEFAULT); setSelStates([]); setSelYears(null); };
+
+  // Only the peers query takes the weights and the isolations, so a slider or a
+  // chart click re-runs THAT query alone — the tiles / map / trend keep their
+  // rows and never repaint.
+  const peerGivens = React.useMemo(
+    () => ({
+      ...givens,
+      W_FREQ: applied.freq, W_PLACE: applied.place, W_TIME: applied.time,
+      FOCUS_STATE: selStates.length ? filters.oneOf(...selStates) : "",
+      USE_FOCUS_STATE: selStates.length > 0,
+      FOCUS_YEARS: selYears ? filters.between(selYears.from, selYears.to) : "",
+      USE_FOCUS_YEARS: !!selYears,
+    }),
+    [givens, applied, selStates, selYears]
+  );
+
   const tiles = useQuery({ query: "name_explorer", givens });
   const byState = useQuery({ query: "name_by_state", givens });
   const overTime = useQuery({ query: "name_over_time", givens });
-  const peers = useQuery({ query: "similar_names", givens });
+  const peers = useQuery({ query: "similar_names", givens: peerGivens });
   const sigQ = useQuery({ query: "name_signature", givens });
 
   const stat = (tiles.rows && tiles.rows[0]) || null;
@@ -346,23 +739,53 @@ export default function Dashboard({ dashboard, givens }) {
 
   const pctMale = stat ? Math.round(num(stat.percent_male) * 100) : null;
 
+  const sig = (sigQ.rows && sigQ.rows[0]) || null;
+  const decadeLabel = sig && sig.peak_decade != null ? `${num(sig.peak_decade)}s` : null;
+
+  // What the score is matching against right now — an isolated selection wins
+  // over the name's own signature. Shown under the Location / Time sliders.
+  const placeText = selStates.length
+    ? selStates.join(", ")
+    : sig ? `${sig.top_state} — its top state` : "its top state";
+  const timeText = selYears
+    ? `born ${yearsLabel(selYears)}`
+    : decadeLabel ? `born in the ${decadeLabel} — its peak` : "its peak decade";
+  const hints = {
+    freq: { text: "as famous as this name", isolated: false },
+    place: { text: selStates.length ? `from ${placeText}` : `from ${placeText}`, isolated: selStates.length > 0 },
+    time: { text: timeText, isolated: !!selYears },
+  };
+  const peersNote = `Kids who'd have been born ${selYears ? yearsLabel(selYears) : `around the ${decadeLabel || "peak decade"}`} in ${placeText.replace(" — its top state", "")}, with a name about as common as this one. Click the map or the decades to isolate; move the sliders to change what "classmate" means.`;
+
+  // Keep the last classmate rows for THIS name on screen while a slider re-runs
+  // (useQuery drops rows while loading, which would flash the tile empty).
+  const nameKey = String((givens && givens.NAME) || "");
+  const peerCache = React.useRef({ key: null, rows: null });
+  React.useEffect(() => {
+    if (peers.rows) peerCache.current = { key: nameKey, rows: peers.rows };
+  }, [peers.rows, nameKey]);
+  const peerRows =
+    peers.rows || (peerCache.current.key === nameKey ? peerCache.current.rows : null) || [];
+  const peersStale = peers.loading && !peers.rows && peerRows.length > 0;
+
   // Peers: which gender is the target's, then split the two returned rows into
-  // "similar" (same gender) and "might be married to" (opposite).
+  // "classmates" (same gender) and "might be married to" (opposite).
   const targetGender = pctMale == null ? "F" : pctMale >= 50 ? "M" : "F";
+  const pct = (v) => (num(v) * 100 < 1 ? (num(v) * 100).toFixed(1) : Math.round(num(v) * 100)) + "%";
   const groupFor = (g) => {
-    const row = (peers.rows || []).find((r) => r.gender === g);
+    const row = peerRows.find((r) => r.gender === g);
     return (row && Array.isArray(row.names) ? row.names : []).map((n) => ({
       name: n.name,
-      sub: num(n.cohort).toLocaleString() + " births nationally",
+      score: num(n.match_score),
+      sub: [
+        num(n.cohort).toLocaleString() + " births",
+        decadeLabel ? `${pct(n.time_fit)} in the ${decadeLabel}` : null,
+        sig ? `${pct(n.place_fit)} in ${sig.top_state}` : null,
+      ].filter(Boolean).join(" · "),
     }));
   };
   const similarPeers = groupFor(targetGender);
   const marriedPeers = groupFor(targetGender === "M" ? "F" : "M");
-  const sig = (sigQ.rows && sigQ.rows[0]) || null;
-  const decadeLabel = sig && sig.peak_decade != null ? `${num(sig.peak_decade)}s` : null;
-  const peersNote = sig
-    ? `Same national popularity, peaking in the ${decadeLabel} and most concentrated in ${sig.top_state}.`
-    : null;
 
   const anyLoading = tiles.loading || byState.loading || overTime.loading;
   const err = tiles.error || byState.error || overTime.error;
@@ -395,25 +818,39 @@ export default function Dashboard({ dashboard, givens }) {
           </div>
 
           <Card ink={ink}>
-            <SectionTitle ink={ink} note={peersNote}>Names of the same era &amp; place</SectionTitle>
+            <SectionTitle ink={ink} note={peersNote}>Possible Classmates</SectionTitle>
+            <WeightPanel
+              ink={ink}
+              hues={hues}
+              weights={draft}
+              hints={hints}
+              busy={peers.loading}
+              isolated={selStates.length > 0 || !!selYears}
+              onChange={(k, v) => setDraft((w) => ({ ...w, [k]: v }))}
+              onReset={resetAll}
+            />
             <div style={{ display: "flex", gap: 32, flexWrap: "wrap", alignItems: "flex-start" }}>
               <PeerColumn
                 ink={ink}
-                label="Similar names"
-                note="Same sex — peers of the same time and place"
+                accent={series[targetGender]}
+                label="In the same class"
+                note="Same sex — kids of the same time and place"
                 names={similarPeers}
                 loading={peers.loading}
+                stale={peersStale}
               />
               <PeerColumn
                 ink={ink}
+                accent={series[targetGender === "M" ? "F" : "M"]}
                 label="Might be married to"
                 note="Opposite sex — the same generation and state"
                 names={marriedPeers}
                 loading={peers.loading}
+                stale={peersStale}
               />
             </div>
             <div style={{ fontSize: 11, color: ink.muted, marginTop: 14 }}>
-              Click a name to explore it. Matched on peak decade, most-concentrated state, and national popularity.
+              Click a name to explore it; a darker chip is a closer match. Hover for the numbers behind it.
             </div>
           </Card>
 
@@ -422,15 +859,22 @@ export default function Dashboard({ dashboard, givens }) {
               ink={ink}
               rows={byState.rows}
               note="Births with the name per 100,000 births in each state"
+              selected={selStates}
+              onToggle={toggleState}
+              onClear={() => setSelStates([])}
             />
-            <Figure
-              ink={ink}
-              title="Popularity over time"
-              note="Births per year, male / female"
-              height={200}
-              data={timeRows}
-              buildSpec={(w, h) => genderLineSpec({ width: w, height: h, ink, series, yField: "babies_named", yTitle: "Births / year" })}
-            />
+            <Card ink={ink}>
+              <SectionTitle ink={ink} note="Births per year, male / female">Popularity over time</SectionTitle>
+              <TimeChart ink={ink} series={series} rows={timeRows} band={previewYears || selYears} />
+              <DecadeRail
+                ink={ink}
+                accent={hues.time}
+                rows={timeRows}
+                sel={selYears}
+                onChange={setSelYears}
+                onPreview={setPreviewYears}
+              />
+            </Card>
           </div>
         </div>
       )}

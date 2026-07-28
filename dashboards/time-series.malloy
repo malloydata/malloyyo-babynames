@@ -1,6 +1,6 @@
 ##! experimental { access_modifiers givens }
 
-import "../baby_names.malloy"
+import "../index.malloy"
 
 // Flat rows (one per year+state) for the custom animated map (time-series.jsx):
 // the JSX pulls the whole series once via useQuery and scrubs client-side.
