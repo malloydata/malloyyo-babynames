@@ -1,6 +1,6 @@
 ##! experimental { access_modifiers givens }
 
-import "md.malloy"
+import "gs.malloy"
 
 given:
   # label="State" control=select suggest { source=baby_names dimension=state }
