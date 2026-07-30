@@ -10,10 +10,13 @@
     }
   },
   "malloyyo": {
-    "localhost": {
-      "url": "http://localhost:3000",
-      "dataset": "babynames",
-      "malloyyo_token": {"env": "MALLOYYO_PUBLISH_TOKEN"}
+    "analytics": "G-6F8VEHMGWT",
+    "targets": {
+      "localhost": {
+        "url": "http://localhost:3000",
+        "dataset": "babynames",
+        "malloyyo_token": {"env": "MALLOYYO_PUBLISH_TOKEN"}
+      }
     }
   }
 }
